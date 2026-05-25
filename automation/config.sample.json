@@ -1,0 +1,49 @@
+{
+  "platforms": {
+    "admin": {
+      "url": "https://master.walking20s.com/go20/mgr/#/login",
+      "username": "",
+      "password": "",
+      "securityPassword": ""
+    },
+    "insurance": {
+      "url": "https://9sdtb.hizom.cn/",
+      "username": "",
+      "password": ""
+    }
+  },
+  "tasks": [
+    {
+      "enabled": true,
+      "routeName": "徒步东西冲",
+      "packageName": "深圳出发（周六）",
+      "startDate": "2026-06-06",
+      "endDate": "2026-06-06",
+      "confirmMode": "manual",
+      "payMode": "manual"
+    }
+  ],
+  "routes": [
+    {
+      "enabled": true,
+      "routeName": "徒步东西冲",
+      "routeType": "1天短线",
+      "keywords": "徒步,东西冲",
+      "companyCode": "GZXS20",
+      "category": "户外徒步",
+      "insurer": "太平洋",
+      "product": "太平洋-漫游港澳台计划",
+      "plan": "计划一-[10万]",
+      "startOffsetDays": 0,
+      "durationDays": 1,
+      "remarkTemplate": "{routeName} {startDate}"
+    }
+  ],
+  "companies": [
+    {
+      "code": "GZXS20",
+      "name": "广州行走贰拾国际旅行社有限公司",
+      "taxId": "91440101MA5D5UHG6K"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "insurance-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install-browsers": "playwright install chromium",
+    "dashboard": "node automation/server.mjs",
+    "dry-run": "node automation/run.mjs --dry-run true",
+    "run": "node automation/run.mjs",
+    "clean": "node automation/clean-data.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.57.0",
+    "xlsx": "^0.18.5"
+  }
+}

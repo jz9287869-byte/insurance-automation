@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>投保自动化配置</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <section class="login-screen" id="loginScreen">
+      <form class="login-card" id="loginForm">
+        <h1>投保自动化配置</h1>
+        <p>请输入访问账号后继续。</p>
+        <label>
+          <span>账号</span>
+          <input id="pageUsernameInput" autocomplete="username" autofocus />
+        </label>
+        <label>
+          <span>密码</span>
+          <input id="pagePasswordInput" type="password" autocomplete="current-password" />
+        </label>
+        <button class="run" type="submit">登录</button>
+        <div class="login-error" id="loginError"></div>
+      </form>
+    </section>
+
+    <div id="appShell" hidden>
+    <header class="topbar">
+      <div>
+        <h1>投保自动化配置</h1>
+        <p>维护本次执行表和总路线配置库，供后续自动导出、清洗、投保流程读取。</p>
+      </div>
+      <div class="topbar-actions">
+        <button class="run" id="startRunBtn" type="button">开始执行</button>
+        <button class="secondary" id="logoutBtn" type="button">退出</button>
+        <button class="secondary" id="exportJsonBtn" type="button">导出配置</button>
+        <label class="secondary file-button" for="importJsonInput">导入配置</label>
+        <input id="importJsonInput" type="file" accept="application/json" />
+        <button class="primary" id="saveBtn" type="button">保存</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>本次执行表</h2>
+            <p>每次运行前，只勾选需要投保的路线和排期。</p>
+          </div>
+          <div class="panel-actions">
+            <button class="secondary" id="addTaskBtn" type="button">新增执行路线</button>
+            <button class="ghost" id="exportTasksCsvBtn" type="button">导出 CSV</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="tasksTable">
+            <thead>
+              <tr>
+                <th>执行</th>
+                <th>路线名称</th>
+                <th>规格/套餐</th>
+                <th>出发日期</th>
+                <th>结束日期</th>
+                <th>配置匹配</th>
+                <th>确认投保</th>
+                <th>支付</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>总路线配置库</h2>
+            <p>定义每条路线默认使用的公司主体、分类、保司、产品和起保规则。</p>
+          </div>
+          <div class="panel-actions">
+            <button class="secondary" id="addRouteBtn" type="button">新增路线配置</button>
+            <button class="ghost" id="exportRoutesCsvBtn" type="button">导出 CSV</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="routesTable">
+            <thead>
+              <tr>
+                <th>启用</th>
+                <th>路线名称</th>
+                <th>路线类型</th>
+                <th>关键词</th>
+                <th>公司主体</th>
+                <th>分类</th>
+                <th>保司</th>
+                <th>产品</th>
+                <th>计划</th>
+                <th>提前天数</th>
+                <th>保险天数</th>
+                <th>备注格式</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>平台账号</h2>
+            <p>用于后续自动登录后台管理系统和保险平台；当前保存于本机浏览器本地存储。</p>
+          </div>
+          <div class="panel-actions">
+            <button class="ghost" id="openAdminBtn" type="button">打开后台</button>
+            <button class="ghost" id="openInsuranceBtn" type="button">打开保险平台</button>
+          </div>
+        </div>
+        <div class="credentials-grid">
+          <div class="credential-box">
+            <h3>后台管理系统</h3>
+            <label>
+              <span>登录地址</span>
+              <input id="adminUrlInput" type="url" />
+            </label>
+            <label>
+              <span>账号</span>
+              <input id="adminUsernameInput" autocomplete="username" />
+            </label>
+            <label>
+              <span>密码</span>
+              <input id="adminPasswordInput" type="password" autocomplete="current-password" />
+            </label>
+            <label>
+              <span>二次密码/安全密码</span>
+              <input id="adminSecurityPasswordInput" type="password" autocomplete="off" />
+            </label>
+          </div>
+          <div class="credential-box">
+            <h3>保险平台</h3>
+            <label>
+              <span>登录地址</span>
+              <input id="insuranceUrlInput" type="url" />
+            </label>
+            <label>
+              <span>账号</span>
+              <input id="insuranceUsernameInput" autocomplete="username" />
+            </label>
+            <label>
+              <span>密码</span>
+              <input id="insurancePasswordInput" type="password" autocomplete="current-password" />
+            </label>
+          </div>
+          <div class="credential-note">
+            <h3>执行边界</h3>
+            <p>开始执行会先打开后台管理系统。真正的自动导出、清洗、填写保险平台，需要由本地自动化脚本读取这份配置后执行。</p>
+            <p>如果开启自动确认投保或自动支付，预检会提示风险；第一版建议保持人工确认和人工支付。</p>
+            <div class="run-status" id="runStatus">
+              <strong>执行状态</strong>
+              <div id="runStatusText">未启动</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel split">
+        <div>
+          <h2>公司主体</h2>
+          <p>投保前会校验保险平台上的投保人是否与配置一致。</p>
+          <div class="table-wrap compact">
+            <table id="companiesTable">
+              <thead>
+                <tr>
+                  <th>主体编码</th>
+                  <th>公司名称</th>
+                  <th>纳税人识别号</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <button class="secondary inline-action" id="addCompanyBtn" type="button">新增公司主体</button>
+        </div>
+        <aside class="summary">
+          <h2>运行预检</h2>
+          <div id="checkList"></div>
+        </aside>
+      </section>
+    </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

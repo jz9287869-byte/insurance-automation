@@ -1,0 +1,10 @@
+node_modules/
+automation/.browser-profile/
+automation/.browser-profile-diagnose/
+automation/downloads/
+automation/outputs/
+automation/outputs-*/
+automation/config.json
+automation/status.json
+.DS_Store
+*.log
