@@ -165,21 +165,25 @@ export async function exportSalesTable(page, task, downloadDir, adminPlatform = 
 
 export async function fillInsuranceProposal(page, payload, company, options = {}) {
   const { insurance } = payload;
-  console.log(`填写保险平台：${insurance.category} / ${insurance.insurer} / ${insurance.product}`);
+  console.log(`填写保险平台：${insurance.category} / ${insurance.insurer} / ${insurance.product} / ${insurance.plan || "未配置计划"}`);
 
   await clickText(page, insurance.category);
   await clickText(page, insurance.insurer);
-  await fillProduct(page, insurance.product);
+  await fillProduct(page, insurance.product, insurance.plan);
   await fillInsuranceDuration(page, insurance.durationDays);
   await fillDateTime(page, "起保时间", insurance.startDate, insurance.startTime);
-  await fillDateTime(page, "止保时间", insurance.endDate, insurance.endTime);
+  await verifyInsuranceCoverage(page, insurance);
   await fillTravelDestination(page, payload.routeInfo?.城市 || payload.task?.routeName || "");
   await fillFieldByText(page, "团号/备注", insurance.remark, { component: "input" });
 
-  await clickText(page, "粘贴名单");
+  await openPasteTravelerDialog(page);
   await pasteTravelerList(page, payload.pasteList);
 
   await ensureCompany(page, company);
+  if (options.confirmMode === "skip") {
+    console.log("已完成保险平台字段验证，按配置跳过确认投保和支付。");
+    return;
+  }
   await readInsuranceMaterials(page);
 
   if (options.confirmMode !== "auto") {
@@ -200,14 +204,20 @@ export async function readInsuranceMaterials(page) {
   await clickAgreementCheckbox(page);
 
   const tabs = ["投保注意事项", "保险条款", "投保通知", "投保须知", "客户告知书"];
-  for (const tab of tabs) {
-    const clicked = await clickTextIfVisible(page, tab);
-    if (!clicked) continue;
-    await page.waitForTimeout(400);
-    await clickReadButton(page);
+  const materialDialog = await findVisibleDialog(page, 3000, /投保材料|投保注意事项|保险条款|客户告知书|投保通知|投保须知/);
+  if (!materialDialog) {
+    console.log("保险平台：未检测到投保材料弹窗，继续后续流程。");
+    return;
   }
 
-  await clickTextIfVisible(page, "关闭");
+  for (const tab of tabs) {
+    const clicked = await clickDialogTextIfVisible(materialDialog, tab);
+    if (!clicked) continue;
+    await page.waitForTimeout(400);
+    await clickReadButton(page, materialDialog, tab);
+  }
+
+  await closeMaterialDialog(page, materialDialog);
   await clickAgreementCheckbox(page);
 }
 
@@ -223,15 +233,21 @@ export async function handleSuccessDialog(page) {
 
 async function pasteTravelerList(page, pasteList) {
   const dialog = await findVisibleDialog(page, 10000);
-  if (!dialog) throw new Error("未检测到粘贴名单弹窗");
   const textbox =
     (await firstVisible([
-      dialog.getByRole("textbox").first(),
-      dialog.locator("textarea").first(),
-      dialog.locator(".el-textarea__inner").first(),
-      dialog.locator("[contenteditable='true']").first(),
-      dialog.locator("div[role='textbox']").first(),
-    ])) || dialog;
+      dialog?.getByRole("textbox").first(),
+      dialog?.locator("textarea").first(),
+      dialog?.locator(".el-textarea__inner").first(),
+      dialog?.locator("[contenteditable='true']").first(),
+      dialog?.locator("div[role='textbox']").first(),
+      page.locator(".el-dialog__wrapper:visible textarea").last(),
+      page.locator(".el-dialog__wrapper:visible .el-textarea__inner").last(),
+      page.locator("textarea:visible").last(),
+      page.locator(".el-textarea__inner:visible").last(),
+      page.locator("[contenteditable='true']:visible").last(),
+    ])) || null;
+
+  if (!textbox) throw new Error("未检测到粘贴名单输入框");
 
   await textbox.waitFor({ state: "visible", timeout: 10000 });
   await textbox.click({ force: true }).catch(() => {});
@@ -239,42 +255,129 @@ async function pasteTravelerList(page, pasteList) {
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
     await page.keyboard.type(pasteList, { delay: 10 }).catch(() => {});
   });
-  await clickDialogButtonIfVisible(page, "确定");
+  const confirmed = await clickDialogButtonIfVisible(page, "确定");
+  if (!confirmed) {
+    const fallbackConfirm = await firstVisible([
+      dialog?.getByRole("button", { name: /确定/ }).first(),
+      page.getByRole("button", { name: /确定/ }).last(),
+      page.locator("button", { hasText: "确定" }).last(),
+      page.locator(".el-button", { hasText: "确定" }).last(),
+    ]);
+    if (fallbackConfirm) {
+      await fallbackConfirm.click({ force: true }).catch(() => {});
+    }
+  }
   await page.waitForTimeout(500);
 }
 
-async function fillProduct(page, product) {
+async function openPasteTravelerDialog(page) {
+  const button =
+    (await firstVisible([
+      page.getByRole("button", { name: /粘贴名单/ }).first(),
+      page.locator("button", { hasText: "粘贴名单" }).first(),
+      page.locator(".el-button", { hasText: "粘贴名单" }).first(),
+      page.getByText("粘贴名单", { exact: false }).first(),
+    ])) || null;
+
+  if (!button) {
+    throw new Error("未找到粘贴名单按钮");
+  }
+
+  await button.scrollIntoViewIfNeeded().catch(() => {});
+  await button.click({ force: true }).catch(() => {});
+  if (await hasPasteTravelerDialog(page, 1500)) return;
+
+  await button.evaluate((node) => {
+    const target = node.closest("button") || node;
+    target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+  }).catch(() => {});
+  if (await hasPasteTravelerDialog(page, 2000)) return;
+
+  throw new Error("点击粘贴名单后未打开弹窗");
+}
+
+async function hasPasteTravelerDialog(page, timeoutMs = 0) {
+  const start = Date.now();
+  while (true) {
+    const dialog = await findVisibleDialog(page, 0);
+    if (dialog) {
+      const hasTextbox = await firstVisible([
+        dialog.getByRole("textbox").first(),
+        dialog.locator("textarea").first(),
+        dialog.locator(".el-textarea__inner").first(),
+        dialog.locator("[contenteditable='true']").first(),
+      ]);
+      if (hasTextbox) return true;
+    }
+
+    const looseTextbox = await firstVisible([
+      page.locator(".el-dialog__wrapper:visible textarea").first(),
+      page.locator(".el-message-box:visible textarea").first(),
+      page.locator(".ant-modal:visible textarea").first(),
+      page.locator("textarea:visible").first(),
+    ]);
+    if (looseTextbox) return true;
+
+    if (timeoutMs <= 0 || Date.now() - start >= timeoutMs) break;
+    await page.waitForTimeout(200);
+  }
+  return false;
+}
+
+async function fillProduct(page, product, plan) {
+  const displayProduct = buildInsuranceProductDisplay(product, plan);
+  const normalizedPlan = normalizeLabel(String(plan || "")).replace(/[\[\]（）()]/g, "");
   const keyword = product
     .replace(/^\[/, "")
     .replace(/\].*$/, "")
     .replace(/\s+/g, "")
     .trim();
-  const normalizedTarget = normalizeLabel(product).replace(/[\[\]（）()]/g, "");
+  const normalizedTarget = normalizeLabel(displayProduct).replace(/[\[\]（）()]/g, "");
   const normalizedKeyword = normalizeLabel(keyword).replace(/[\[\]（）()]/g, "");
+  const matchesTarget = (text) => {
+    if (!text) return false;
+    if (normalizedPlan) {
+      return text.includes(normalizedTarget) || normalizedTarget.includes(text) || text.includes(normalizedPlan);
+    }
+    return textMatchesProduct(text, normalizedTarget, normalizedKeyword);
+  };
 
   const productRow = await findInsuranceProductRow(page);
   if (productRow) {
     const rowText = normalizeLabel(await productRow.innerText().catch(() => "")).replace(/[\[\]（）()]/g, "");
-    if (textMatchesProduct(rowText, normalizedTarget, normalizedKeyword)) {
-      console.log(`保险平台：产品行已是目标值 -> ${product}`);
+    if (matchesTarget(rowText)) {
+      console.log(`保险平台：产品行已是目标值 -> ${displayProduct}`);
       return;
     }
 
+    const currentMatcher = async () => {
+      const currentText = normalizeLabel(await productRow.innerText().catch(() => "")).replace(/[\[\]（）()]/g, "");
+      return matchesTarget(currentText);
+    };
+
     const rowControl =
       (await firstVisibleInField(productRow, [
-        "[role='combobox']",
         ".el-select",
+        ".el-select .el-input__suffix",
+        ".el-select .el-select__caret",
+        "[role='combobox']",
+        ".el-select .el-input__inner",
         ".ant-select",
         ".el-input",
         "input",
       ])) || productRow;
-    await selectDropdownOption(page, rowControl, product, {
-      optionText: product,
-      fallbackOptionText: keyword,
-      currentMatcher: async () => {
-        const currentText = normalizeLabel(await productRow.innerText().catch(() => "")).replace(/[\[\]（）()]/g, "");
-        return textMatchesProduct(currentText, normalizedTarget, normalizedKeyword);
-      },
+    const pickedByMouse = await selectInsuranceComboboxLikeUser(page, rowControl, displayProduct, {
+      fallbackOptionText: plan || keyword,
+      currentMatcher,
+    });
+    if (pickedByMouse) return;
+
+    await selectDropdownOption(page, rowControl, displayProduct, {
+      optionText: displayProduct,
+      fallbackOptionText: plan || keyword,
+      currentMatcher,
     });
     return;
   }
@@ -283,9 +386,10 @@ async function fillProduct(page, product) {
   const control =
     (field
       ? await firstVisibleInField(field, [
-          ".el-select .el-input__inner",
-          ".el-select .el-select__caret",
           ".el-select",
+          ".el-select .el-input__suffix",
+          ".el-select .el-select__caret",
+          ".el-select .el-input__inner",
           "[role='combobox']",
           ".el-input",
           "input",
@@ -294,8 +398,8 @@ async function fillProduct(page, product) {
 
   if (field) {
     const fieldText = normalizeLabel(await field.innerText().catch(() => "")).replace(/[\[\]（）()]/g, "");
-    if (fieldText && textMatchesProduct(fieldText, normalizedTarget, normalizedKeyword)) {
-      console.log(`保险平台：产品区域已包含目标值 -> ${product}`);
+    if (fieldText && matchesTarget(fieldText)) {
+      console.log(`保险平台：产品区域已包含目标值 -> ${displayProduct}`);
       return;
     }
   }
@@ -308,17 +412,25 @@ async function fillProduct(page, product) {
       .map((item) => normalizeLabel(item).replace(/[\[\]（）()]/g, ""))
       .filter(Boolean);
 
-    if (currentParts.some((item) => textMatchesProduct(item, normalizedTarget, normalizedKeyword))) {
-      console.log(`保险平台：产品已是目标值 -> ${product}`);
+    if (currentParts.some((item) => matchesTarget(item))) {
+      console.log(`保险平台：产品已是目标值 -> ${displayProduct}`);
       return;
     }
   }
 
-  await fillFieldByText(page, "产品", product, {
+  await fillFieldByText(page, "产品", displayProduct, {
     component: "select",
-    optionText: product,
-    fallbackOptionText: keyword,
+    optionText: displayProduct,
+    fallbackOptionText: plan || keyword,
   });
+}
+
+function buildInsuranceProductDisplay(product, plan) {
+  const base = String(product || "").trim();
+  const selectedPlan = String(plan || "").trim();
+  if (!selectedPlan) return base;
+  if (base.includes(selectedPlan)) return base;
+  return `${base}-${selectedPlan}`;
 }
 
 async function findInsuranceProductRow(page) {
@@ -382,9 +494,11 @@ async function fillInsuranceDuration(page, durationDays) {
 
     const control =
       (await firstVisibleInField(row, [
+        ".el-select",
+        ".el-select .el-input__suffix",
+        ".el-select .el-select__caret",
         "[role='combobox']",
         ".el-select .el-input__inner",
-        ".el-select",
         "input.el-input__inner",
         "input",
       ])) || row;
@@ -394,19 +508,109 @@ async function fillInsuranceDuration(page, durationDays) {
         await control.inputValue().catch(() => ""),
         await control.innerText().catch(() => ""),
         await control.textContent().catch(() => ""),
+        await row.locator("[role='combobox']").first().innerText().catch(() => ""),
+        await row.locator(".el-select").first().innerText().catch(() => ""),
+        await row.innerText().catch(() => ""),
       ]
         .map((item) => String(item || "").trim())
+        .filter(Boolean)
         .join(" ");
-      return normalizeLabel(current) === normalizeLabel(target);
+      return normalizeLabel(current).includes(normalizeLabel(target));
     };
 
-    if (await currentMatcher()) return;
+    if (await currentMatcher()) {
+      console.log(`保险平台：保险期限已是目标值 -> ${target}`);
+      return;
+    }
+
+    console.log(`保险平台：准备选择保险期限 -> ${target}`);
+
+    const selectByVisiblePopup = async () => {
+      await openDropdown(page, control);
+      const popup = await firstVisible([
+        page.locator(".el-select-dropdown:visible").last(),
+        page.locator(".el-popper:visible").last(),
+        page.locator("[role='listbox']:visible").last(),
+      ]);
+      if (!popup) return false;
+
+      const items = popup.locator(".el-select-dropdown__item, [role='option'], li");
+      const itemCount = await items.count().catch(() => 0);
+      for (let itemIndex = 0; itemIndex < itemCount; itemIndex += 1) {
+        const item = items.nth(itemIndex);
+        if (!(await item.isVisible().catch(() => false))) continue;
+        const itemText = normalizeLabel(await item.innerText().catch(() => ""));
+        if (itemText !== normalizeLabel(target)) continue;
+        await item.scrollIntoViewIfNeeded().catch(() => {});
+        await item.click({ force: true }).catch(() => {});
+        await page.waitForTimeout(250);
+        return await currentMatcher().catch(() => false);
+      }
+      return false;
+    };
+
+    const selectByKeyboard = async () => {
+      const currentText = [
+        await control.inputValue().catch(() => ""),
+        await control.innerText().catch(() => ""),
+        await control.textContent().catch(() => ""),
+        await row.locator("[role='combobox']").first().innerText().catch(() => ""),
+        await row.locator(".el-select").first().innerText().catch(() => ""),
+      ]
+        .join(" ")
+        .match(/\b\d+\b/g);
+      const currentNumber = currentText ? Number(currentText[0]) : Number.NaN;
+      const targetNumber = Number(target);
+      if (Number.isNaN(targetNumber)) return false;
+
+      await openDropdown(page, control);
+      await control.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(100);
+
+      if (!Number.isNaN(currentNumber)) {
+        const diff = targetNumber - currentNumber;
+        const key = diff >= 0 ? "ArrowDown" : "ArrowUp";
+        for (let step = 0; step < Math.abs(diff); step += 1) {
+          await page.keyboard.press(key).catch(() => {});
+          await page.waitForTimeout(80);
+        }
+      } else {
+        for (let step = 0; step < targetNumber; step += 1) {
+          await page.keyboard.press("ArrowDown").catch(() => {});
+          await page.waitForTimeout(80);
+        }
+      }
+
+      await page.keyboard.press("Enter").catch(() => {});
+      await page.waitForTimeout(250);
+      return await currentMatcher().catch(() => false);
+    };
+
+    if (await selectByVisiblePopup()) {
+      console.log(`保险平台：保险期限选择成功 -> ${target}`);
+      return;
+    }
+
+    const pickedByMouse = await selectInsuranceComboboxLikeUser(page, control, target, {
+      fallbackOptionText: target,
+      currentMatcher,
+    });
+    if (pickedByMouse) {
+      console.log(`保险平台：保险期限选择成功(鼠标仿真) -> ${target}`);
+      return;
+    }
+
+    if (await selectByKeyboard()) {
+      console.log(`保险平台：保险期限选择成功(键盘回退) -> ${target}`);
+      return;
+    }
 
     await selectDropdownOption(page, control, target, {
       optionText: target,
       fallbackOptionText: target,
       currentMatcher,
     });
+    console.log(`保险平台：保险期限选择成功(通用下拉) -> ${target}`);
     return;
   }
 
@@ -415,6 +619,49 @@ async function fillInsuranceDuration(page, durationDays) {
     optionText: target,
     fallbackOptionText: target,
   });
+}
+
+async function verifyInsuranceCoverage(page, insurance) {
+  const expectedDuration = normalizeLabel(String(insurance.durationDays || ""));
+  const expectedPlan = normalizeLabel(String(insurance.plan || ""));
+  const expectedStartDate = normalizeLabel(String(insurance.startDate || ""));
+  const rows = page.locator("tr");
+  const count = await rows.count().catch(() => 0);
+
+  for (let index = 0; index < count; index += 1) {
+    const row = rows.nth(index);
+    if (!(await row.isVisible().catch(() => false))) continue;
+    const text = normalizeLabel(await row.innerText().catch(() => ""));
+
+    if (expectedDuration && text.includes(normalizeLabel("保险期限"))) {
+      const actual = normalizeLabel(
+        [
+          await row.locator("[role='combobox']").first().innerText().catch(() => ""),
+          await row.locator(".el-select").first().innerText().catch(() => ""),
+          await row.locator("input").first().inputValue().catch(() => ""),
+        ]
+          .join(" ")
+          .trim()
+      );
+      if (!actual.includes(expectedDuration)) {
+        throw new Error(`保险期限校验失败，期望：${insurance.durationDays}，实际：${actual || "空"}`);
+      }
+    }
+
+    if (expectedStartDate && text.includes(normalizeLabel("起保时间"))) {
+      const actualStartDate = normalizeLabel(await row.locator("input").first().inputValue().catch(() => ""));
+      if (actualStartDate && actualStartDate !== expectedStartDate) {
+        throw new Error(`起保时间校验失败，期望：${insurance.startDate}，实际：${actualStartDate}`);
+      }
+    }
+
+    if (expectedPlan && text.includes(normalizeLabel("产品")) && !text.includes(normalizeLabel("产品内容"))) {
+      const actualPlanText = normalizeLabel(await row.innerText().catch(() => ""));
+      if (!actualPlanText.includes(expectedPlan)) {
+        throw new Error(`计划校验失败，期望：${insurance.plan}，实际产品行：${actualPlanText || "空"}`);
+      }
+    }
+  }
 }
 
 async function clickAgreementCheckbox(page) {
@@ -452,11 +699,19 @@ async function clickAgreementCheckbox(page) {
 
 async function ensureCompany(page, company) {
   if (!company) return;
-  const bodyText = await page.locator("body").innerText({ timeout: 3000 }).catch(() => "");
-  if (company.name && !bodyText.includes(company.name)) {
+  const bodyText = await page.locator("body").innerText({ timeout: 8000 }).catch(() => "");
+  const inputValues = await page.locator("input:visible, textarea:visible").evaluateAll((nodes) =>
+    nodes
+      .map((node) => ("value" in node ? node.value : ""))
+      .filter(Boolean)
+      .join("\n")
+  ).catch(() => "");
+  const combinedText = `${bodyText}\n${inputValues}`;
+
+  if (company.name && !combinedText.includes(company.name)) {
     throw new Error(`保险平台投保人公司主体不匹配，页面未找到：${company.name}`);
   }
-  if (company.taxId && !bodyText.includes(company.taxId)) {
+  if (company.taxId && !combinedText.includes(company.taxId)) {
     throw new Error(`保险平台投保人纳税人识别号不匹配，页面未找到：${company.taxId}`);
   }
 }
@@ -765,11 +1020,56 @@ async function allVisibleTableRowsChecked(page) {
   return checkedRowCount === visibleRowCount;
 }
 
-async function clickReadButton(page) {
-  const button = page.getByRole("button").filter({ hasText: /已详细阅读并理解/ }).first();
-  if ((await button.count()) > 0) {
-    await button.click().catch(() => {});
+async function clickReadButton(page, dialog = null, tab = "") {
+  const roots = [dialog, page].filter(Boolean);
+  const tabLabel = String(tab || "").trim();
+  for (const root of roots) {
+    const candidates = [
+      root.getByRole("button").filter({ hasText: /已详细阅读并理解/ }).last(),
+      root.locator("button, .el-button, [role='button']").filter({ hasText: "已详细阅读并理解" }).last(),
+      tabLabel
+        ? root.locator("button, .el-button, [role='button']").filter({ hasText: new RegExp(`已详细阅读并理解\\s*${escapeRegExp(tabLabel)}`) }).last()
+        : null,
+      tabLabel
+        ? root.getByText(new RegExp(`已详细阅读并理解\\s*${escapeRegExp(tabLabel)}`), { exact: false }).last()
+        : null,
+    ].filter(Boolean);
+
+    const target = await firstVisible(candidates);
+    if (target) {
+      await target.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(300);
+      return true;
+    }
   }
+  return false;
+}
+
+async function closeMaterialDialog(page, dialog) {
+  const closeCandidates = [
+    dialog.locator(".el-dialog__close, .el-message-box__close, [aria-label='Close']").first(),
+    dialog.getByRole("button", { name: /关闭|取消/ }).last(),
+    dialog.locator("button, .el-button, [role='button']").filter({ hasText: /关闭|取消/ }).last(),
+  ];
+  const closeButton = await firstVisible(closeCandidates);
+  if (closeButton) {
+    await closeButton.click({ force: true }).catch(() => {});
+    await page.waitForTimeout(300);
+    return;
+  }
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(300);
+}
+
+async function clickDialogTextIfVisible(dialog, text) {
+  const target = await findVisibleText(dialog, text, 0);
+  if (!target) return false;
+  await target.click({ force: true }).catch(() => {});
+  return true;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function fillFieldByText(page, label, value, options = {}) {
@@ -840,18 +1140,22 @@ async function selectDropdownOption(page, inputLocator, value, options = {}) {
   }
 
   for (const text of values) {
-    const candidates = [
-      page.locator(".el-select-dropdown:visible .el-select-dropdown__item", { hasText: text }).first(),
-      page.locator(".el-cascader__dropdown:visible .el-cascader-node", { hasText: text }).first(),
-      page.locator(".el-picker-panel:visible").getByText(text, { exact: false }).first(),
-      page.getByText(text, { exact: false }).first(),
-    ];
+    const candidates = await findVisibleDropdownCandidates(page, text);
 
     for (const candidate of candidates) {
       if ((await candidate.count()) > 0 && (await candidate.isVisible().catch(() => false))) {
-        await candidate.click({ force: true });
-        return;
+        await candidate.click({ force: true }).catch(() => {});
+        await page.waitForTimeout(300);
+        if (!options.currentMatcher) return;
+        if (await options.currentMatcher().catch(() => false)) return;
       }
+    }
+
+    const looseClicked = await clickLooseVisibleDropdownCandidate(page, text);
+    if (looseClicked) {
+      await page.waitForTimeout(300);
+      if (!options.currentMatcher) return;
+      if (await options.currentMatcher().catch(() => false)) return;
     }
   }
 
@@ -874,22 +1178,199 @@ async function selectDropdownOption(page, inputLocator, value, options = {}) {
   throw new Error(`下拉框没有找到可选项：${values.join(" / ")}`);
 }
 
+async function findVisibleDropdownCandidates(page, text) {
+  const popup = await firstVisible([
+    page.locator(".el-select-dropdown:visible").last(),
+    page.locator(".el-cascader__dropdown:visible").last(),
+    page.locator(".el-picker-panel:visible").last(),
+    page.locator(".el-popper:visible [role='listbox']").last(),
+    page.locator("[role='listbox']:visible").last(),
+    page.locator(".ant-select-dropdown:visible").last(),
+  ]);
+
+  const popupCandidates = [];
+  if (popup) {
+    popupCandidates.push(
+      popup.locator(".el-select-dropdown__item").filter({ hasText: text }).first(),
+      popup.locator(".el-cascader-node").filter({ hasText: text }).first(),
+      popup.locator("[role='option']").filter({ hasText: text }).first(),
+      popup.locator("li").filter({ hasText: text }).first(),
+      popup.getByText(text, { exact: false }).first(),
+    );
+  }
+
+  return [
+    ...popupCandidates,
+    page.locator(".el-select-dropdown:visible .el-select-dropdown__item").filter({ hasText: text }).first(),
+    page.locator(".el-cascader__dropdown:visible .el-cascader-node").filter({ hasText: text }).first(),
+    page.locator(".el-popper:visible [role='option']").filter({ hasText: text }).first(),
+    page.locator("[role='listbox']:visible [role='option']").filter({ hasText: text }).first(),
+    page.locator(".ant-select-dropdown:visible [role='option']").filter({ hasText: text }).first(),
+    page.locator(".ant-select-dropdown:visible li").filter({ hasText: text }).first(),
+  ];
+}
+
+async function clickLooseVisibleDropdownCandidate(page, text) {
+  const normalizedTarget = normalizeLabel(String(text || "")).replace(/[✓✔]/g, "");
+  if (!normalizedTarget) return false;
+
+  return await page
+    .evaluate((target) => {
+      const popupSelectors = [
+        ".el-select-dropdown",
+        ".el-popper",
+        ".ant-select-dropdown",
+        "[role='listbox']",
+        ".el-scrollbar",
+      ];
+      const popups = Array.from(document.querySelectorAll(popupSelectors.join(","))).filter(
+        (node) => node instanceof HTMLElement && node.offsetParent !== null,
+      );
+
+      for (const popup of popups.reverse()) {
+        const candidates = Array.from(
+          popup.querySelectorAll(
+            ".el-select-dropdown__item, [role='option'], li, .el-select-dropdown__list li, .el-scrollbar li, div, span",
+          ),
+        ).filter((node) => node instanceof HTMLElement && node.offsetParent !== null);
+
+        const candidate = candidates.find((node) => {
+          const textValue = (node.textContent || "").replace(/[✓✔]/g, "");
+          return textValue.replace(/\s+/g, "").trim() === target.replace(/\s+/g, "").trim();
+        });
+
+        if (!candidate) continue;
+        candidate.scrollIntoView({ block: "nearest" });
+        candidate.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, cancelable: true, view: window }));
+        candidate.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+        candidate.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+        return true;
+      }
+
+      return false;
+    }, normalizedTarget)
+    .catch(() => false);
+}
+
+async function selectInsuranceComboboxLikeUser(page, triggerLocator, optionText, options = {}) {
+  const values = [optionText, options.fallbackOptionText].filter(Boolean);
+  const trigger = await firstVisible([
+    triggerLocator,
+    triggerLocator.locator?.(".el-select").first?.(),
+    triggerLocator.locator?.("[role='combobox']").first?.(),
+    triggerLocator.locator?.(".el-input__inner").first?.(),
+    triggerLocator.locator?.("input").first?.(),
+  ].filter(Boolean));
+  if (!trigger) return false;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (options.currentMatcher && (await options.currentMatcher().catch(() => false))) return true;
+    await trigger.scrollIntoViewIfNeeded().catch(() => {});
+    const box = await trigger.boundingBox().catch(() => null);
+    if (!box) continue;
+
+    const x = box.x + Math.max(Math.min(box.width * 0.45, box.width - 10), 10);
+    const y = box.y + box.height / 2;
+    await page.mouse.click(x, y).catch(() => {});
+    await page.waitForTimeout(220);
+
+    for (const value of values) {
+      if (!value) continue;
+      const clicked = await clickVisibleDropdownItemByMouse(page, value);
+      if (!clicked) continue;
+      await page.waitForTimeout(250);
+      if (!options.currentMatcher) return true;
+      if (await options.currentMatcher().catch(() => false)) return true;
+    }
+  }
+
+  return false;
+}
+
+async function clickVisibleDropdownItemByMouse(page, text) {
+  const normalizedTarget = String(text || "").replace(/[✓✔]/g, "").replace(/\s+/g, "").trim();
+  if (!normalizedTarget) return false;
+
+  const box = await page
+    .evaluate((target) => {
+      const roots = Array.from(
+        document.querySelectorAll(".el-select-dropdown, .el-popper, [role='listbox'], .ant-select-dropdown"),
+      ).filter((node) => node instanceof HTMLElement && node.offsetParent !== null);
+
+      for (const root of roots.reverse()) {
+        const items = Array.from(
+          root.querySelectorAll(".el-select-dropdown__item, [role='option'], li, div, span"),
+        ).filter((node) => node instanceof HTMLElement && node.offsetParent !== null);
+
+        const candidate = items.find((item) => {
+          const value = (item.textContent || "").replace(/[✓✔]/g, "").replace(/\s+/g, "").trim();
+          return value === target;
+        });
+        if (!candidate) continue;
+
+        const rect = candidate.getBoundingClientRect();
+        return {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        };
+      }
+      return null;
+    }, normalizedTarget)
+    .catch(() => null);
+
+  if (!box) return false;
+  await page.mouse.click(box.x, box.y).catch(() => {});
+  return true;
+}
+
 async function openDropdown(page, inputLocator) {
-  await inputLocator.click({ force: true }).catch(() => {});
-  await page.waitForTimeout(200);
-  if (await hasVisiblePopup(page)) return;
+  const candidates = [
+    inputLocator,
+    inputLocator.locator(".el-select__caret").first(),
+    inputLocator.locator(".el-input__suffix").first(),
+    inputLocator.locator(".el-input__suffix-inner").first(),
+    inputLocator.locator("[role='combobox']").first(),
+    inputLocator.locator("input").first(),
+  ];
+
+  for (const candidate of candidates) {
+    if (!(await candidate.count().catch(() => 0))) continue;
+    const visible = await candidate.isVisible().catch(() => false);
+    if (!visible) continue;
+    await candidate.click({ force: true }).catch(() => {});
+    await page.waitForTimeout(180);
+    if (await hasVisiblePopup(page)) return;
+
+    const box = await candidate.boundingBox().catch(() => null);
+    if (box) {
+      const x = Math.max(box.x + Math.min(box.width - 12, box.width * 0.9), box.x + 4);
+      const y = box.y + box.height / 2;
+      await page.mouse.click(x, y).catch(() => {});
+      await page.waitForTimeout(180);
+      if (await hasVisiblePopup(page)) return;
+    }
+  }
 
   await inputLocator.press("ArrowDown").catch(() => {});
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(180);
   if (await hasVisiblePopup(page)) return;
 
-  await inputLocator.evaluate((node) => {
-    const trigger = node.closest(".el-select") || node.closest(".el-input") || node.parentElement || node;
-    trigger.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-    trigger.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
-    trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-  }).catch(() => {});
-  await page.waitForTimeout(250);
+  await inputLocator
+    .evaluate((node) => {
+      const trigger =
+        node.closest(".el-select") ||
+        node.closest("[role='combobox']") ||
+        node.closest(".el-input") ||
+        node.parentElement ||
+        node;
+      trigger.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, cancelable: true, view: window }));
+      trigger.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+      trigger.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+      trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    })
+    .catch(() => {});
+  await page.waitForTimeout(220);
 }
 
 async function hasVisiblePopup(page) {
@@ -942,7 +1423,9 @@ async function fillDateRange(page, firstInput, startDate, endDate) {
 }
 
 async function fillOrderListFilters(page, task) {
-  await selectFormField(page, "状态", "已付款");
+  console.log("订单列表：准备选择状态：已付款、已付尾款");
+  await selectFormField(page, "状态", ["已付款", "已付尾款"], { multi: true });
+  await verifyOrderStatusSelections(page, ["已付款", "已付尾款"]);
   await selectFormField(page, "路线", task.routeName, {
     fallbackOptionText: task.routeName.replace(/\s+/g, ""),
     searchable: true,
@@ -1000,7 +1483,160 @@ async function selectFormField(page, label, value, options = {}) {
 
   if (!control) throw new Error(`未找到字段控件：${label}`);
 
+  if (options.multi) {
+    await selectMultipleDropdownOptions(page, field || control, control, Array.isArray(value) ? value : [value], options);
+    return;
+  }
+
   await selectDropdownOption(page, control, value, options);
+}
+
+async function selectMultipleDropdownOptions(page, field, inputLocator, values, options = {}) {
+  const targets = values.map((item) => String(item || "").trim()).filter(Boolean);
+  if (!targets.length) return;
+
+  await clearMultiSelectSelections(page, field);
+  const trigger =
+    (field
+      ? await firstVisibleInField(field, [
+          ".el-select",
+          ".el-input",
+          "[role='combobox']",
+          ".el-select__tags",
+          "input.el-input__inner",
+          "input",
+        ])
+      : null) || inputLocator;
+
+  for (const item of targets) {
+    console.log(`订单列表：尝试勾选状态 -> ${item}`);
+    await openDropdown(page, trigger);
+    const clicked = await clickVisibleDropdownItem(page, item);
+    if (!clicked) {
+      await trigger.press("Escape").catch(() => {});
+      throw new Error(`订单状态多选未找到选项：${item}`);
+    }
+    await page.waitForFunction(
+      (text) => {
+        const popup = Array.from(document.querySelectorAll(".el-select-dropdown"))
+          .filter((node) => node.offsetParent !== null)
+          .pop();
+        if (!popup) return false;
+        const items = Array.from(popup.querySelectorAll(".el-select-dropdown__item"));
+        return items.some((item) => {
+          const normalized = (item.textContent || "").replace(/[✓✔]/g, "").replace(/\s+/g, "").trim();
+          if (normalized !== String(text).replace(/\s+/g, "").trim()) return false;
+          return (
+            item.classList.contains("selected") ||
+            item.getAttribute("aria-selected") === "true" ||
+            item.querySelector(".selected, .is-selected, .el-icon-check")
+          );
+        });
+      },
+      item,
+      { timeout: 2000 },
+    ).catch(() => {});
+    await page.waitForTimeout(120);
+  }
+
+  await trigger.press("Escape").catch(() => {});
+}
+
+async function clearMultiSelectSelections(page, field) {
+  const clearButtons = field.locator(
+    ".el-select__tags .el-tag__close, .el-select .el-tag__close, .ant-select-selection-item-remove, .ant-select-clear",
+  );
+  const count = await clearButtons.count().catch(() => 0);
+  for (let index = 0; index < count; index += 1) {
+    const button = clearButtons.nth(index);
+    if (!(await button.isVisible().catch(() => false))) continue;
+    await button.click({ force: true }).catch(() => {});
+    await page.waitForTimeout(80);
+  }
+}
+
+async function verifyOrderStatusSelections(page, expectedStatuses) {
+  const field = await findFieldContainer(page, "状态");
+  const control =
+    (field
+      ? await firstVisibleInField(field, [
+          ".el-select input.el-input__inner",
+          ".el-select .el-input__inner",
+          "input.el-input__inner",
+          "input[placeholder='请选择']",
+          "input",
+          ".el-input",
+        ])
+      : null) || (await findInputAfterLabel(page, "状态"));
+
+  if (!control) {
+    throw new Error("订单状态多选校验失败：未找到状态控件");
+  }
+
+  await openDropdown(page, control);
+  const selectedStatuses = await readVisibleSelectedDropdownOptions(page);
+  console.log(`订单列表：检测到已勾选状态：${selectedStatuses.join("、") || "空"}`);
+
+  const missing = expectedStatuses.filter((item) => !selectedStatuses.includes(item));
+  await control.press("Escape").catch(() => {});
+
+  if (missing.length) {
+    throw new Error(`订单状态多选未生效，缺少：${missing.join("、")}`);
+  }
+
+  console.log("订单列表：状态多选校验通过");
+}
+
+async function readVisibleSelectedDropdownOptions(page) {
+  return await page
+    .evaluate(() => {
+      const popup = Array.from(document.querySelectorAll(".el-select-dropdown"))
+        .filter((node) => node.offsetParent !== null)
+        .pop();
+      if (!popup) return [];
+
+      const items = Array.from(popup.querySelectorAll(".el-select-dropdown__item"));
+      const selected = [];
+      for (const item of items) {
+        const text = (item.textContent || "").replace(/\s+/g, " ").trim();
+        if (!text) continue;
+        const isSelected =
+          item.classList.contains("selected") ||
+          item.getAttribute("aria-selected") === "true" ||
+          /|✓|✔/.test(text) ||
+          item.querySelector(".selected, .is-selected, .el-icon-check");
+        if (!isSelected) continue;
+        selected.push(text.replace(/[✓✔]\s*$/g, "").trim());
+      }
+      return selected;
+    })
+    .catch(() => []);
+}
+
+async function clickVisibleDropdownItem(page, text) {
+  const normalizedTarget = String(text || "").replace(/\s+/g, "").trim();
+  return await page
+    .evaluate((target) => {
+      const popup = Array.from(document.querySelectorAll(".el-select-dropdown"))
+        .filter((node) => node.offsetParent !== null)
+        .pop();
+      if (!popup) return false;
+
+      const items = Array.from(popup.querySelectorAll(".el-select-dropdown__item"));
+      const candidate = items.find((item) => {
+        const normalized = (item.textContent || "").replace(/[✓✔]/g, "").replace(/\s+/g, "").trim();
+        return normalized === target;
+      });
+      if (!candidate) return false;
+
+      candidate.scrollIntoView({ block: "nearest" });
+      candidate.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, cancelable: true, view: window }));
+      candidate.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+      candidate.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+      candidate.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return true;
+    }, normalizedTarget)
+    .catch(() => false);
 }
 
 async function fillFormDateRange(page, label, startDate, endDate) {
@@ -1174,7 +1810,9 @@ async function clickTextIfVisible(page, text) {
 
 async function clickDialogButtonIfVisible(page, text) {
   const dialog = await findVisibleDialog(page, 0);
-  const buttons = dialog ? dialog.locator("button, .el-button, [role='button']") : page.locator("_missing_buttons_");
+  const buttons = dialog
+    ? dialog.locator("button, .el-button, [role='button']")
+    : page.locator("button:visible, .el-button:visible, [role='button']:visible");
   const targetLabel = normalizeLabel(text);
   const count = await buttons.count();
   for (let index = 0; index < count; index += 1) {
@@ -1203,6 +1841,7 @@ export async function takeFailureSnapshot(context, outputDir) {
 
 async function firstVisible(locators) {
   for (const locator of locators) {
+    if (!locator) continue;
     if ((await locator.count()) > 0 && (await locator.isVisible().catch(() => false))) {
       return locator;
     }
@@ -1291,7 +1930,15 @@ async function findVisibleText(root, text, timeoutMs = 0) {
 }
 
 async function findVisibleDialog(page, timeoutMs = 0, textPattern = null) {
-  const dialogs = page.locator(".el-dialog, .el-message-box");
+  const dialogs = page.locator([
+    ".el-dialog",
+    ".el-dialog__wrapper",
+    ".el-message-box",
+    ".v-modal + *",
+    "[role='dialog']",
+    ".ant-modal",
+    ".ant-modal-wrap",
+  ].join(", "));
   const start = Date.now();
   while (true) {
     const count = await dialogs.count().catch(() => 0);

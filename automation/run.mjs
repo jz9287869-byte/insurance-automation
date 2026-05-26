@@ -23,6 +23,7 @@ const downloadDir = path.resolve(projectRoot, args.downloads || "automation/down
 const outputDir = path.resolve(projectRoot, args["output-dir"] || "automation/outputs");
 const statusPath = path.resolve(projectRoot, "automation/status.json");
 const headless = args.headless === "true";
+const skipAdmin = args["skip-admin"] === "true";
 
 await fs.mkdir(downloadDir, { recursive: true });
 await fs.mkdir(profileDir, { recursive: true });
@@ -57,7 +58,7 @@ const context = await chromium.launchPersistentContext(profileDir, {
   args: [
     "--no-first-run",
     "--no-default-browser-check",
-    "--disable-features=PasswordLeakDetection,PasswordCheck,PasswordManagerOnboarding,ImprovedPasswordChangeService",
+    "--disable-features=PasswordLeakDetection,PasswordCheck,PasswordManagerOnboarding,ImprovedPasswordChangeService,Translate,TranslateUI,ImprovedTranslate",
   ],
   downloadsPath: downloadDir,
   headless,
@@ -66,30 +67,34 @@ const context = await chromium.launchPersistentContext(profileDir, {
 
 let failed = false;
 try {
-  const adminPage = await context.newPage();
-  await writeStatus({ phase: "admin_login", message: "正在登录后台管理系统" });
-  await openAndLogin(adminPage, config.platforms.admin, "后台管理系统");
-
   const exportedFiles = [];
-  if (args.export === "true") {
-    for (const item of plan.tasks) {
-      await writeStatus({
-        phase: "export_orders",
-        message: `正在导出订单列表：${item.task.routeName} ${item.task.startDate}`,
-        currentTask: item.task,
-      });
-      const orders = await exportOrderList(adminPage, item.task, downloadDir, config.platforms.admin);
-      await writeStatus({
-        phase: "export_routes",
-        message: `正在导出销转表：${item.task.routeName} ${item.task.startDate}`,
-        currentTask: item.task,
-        orders,
-      });
-      const routes = await exportSalesTable(adminPage, item.task, downloadDir, config.platforms.admin);
-      exportedFiles.push({ task: item.task, orders, routes });
+  if (!skipAdmin) {
+    const adminPage = await context.newPage();
+    await writeStatus({ phase: "admin_login", message: "正在登录后台管理系统" });
+    await openAndLogin(adminPage, config.platforms.admin, "后台管理系统");
+
+    if (args.export === "true") {
+      for (const item of plan.tasks) {
+        await writeStatus({
+          phase: "export_orders",
+          message: `正在导出订单列表：${item.task.routeName} ${item.task.startDate}`,
+          currentTask: item.task,
+        });
+        const orders = await exportOrderList(adminPage, item.task, downloadDir, config.platforms.admin);
+        await writeStatus({
+          phase: "export_routes",
+          message: `正在导出销转表：${item.task.routeName} ${item.task.startDate}`,
+          currentTask: item.task,
+          orders,
+        });
+        const routes = await exportSalesTable(adminPage, item.task, downloadDir, config.platforms.admin);
+        exportedFiles.push({ task: item.task, orders, routes });
+      }
+    } else {
+      console.log("后台管理系统已打开。传入 --export true 后会执行订单列表和销转表导出。");
     }
   } else {
-    console.log("后台管理系统已打开。传入 --export true 后会执行订单列表和销转表导出。");
+    console.log("已按参数跳过后台管理系统，直接进入保险平台验证。");
   }
 
   let summaryPath = args.summary ? path.resolve(projectRoot, args.summary) : "";
@@ -265,6 +270,10 @@ async function prepareChromiumProfile(profileDirPath) {
     prefs.profile = prefs.profile || {};
     prefs.profile.password_manager_enabled = false;
     prefs.profile.password_manager_leak_detection = false;
+    prefs.translate = prefs.translate || {};
+    prefs.translate.enabled = false;
+    prefs.translate_offer_enabled = false;
+    prefs.enable_translate = false;
     prefs.profile.default_content_setting_values = prefs.profile.default_content_setting_values || {};
     prefs.profile.exit_type = "Normal";
     prefs.profile.exited_cleanly = true;

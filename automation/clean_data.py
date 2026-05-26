@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+
+VALID_ORDER_STATUSES = {"已付款", "已付尾款"}
 
 
 def main():
@@ -31,7 +34,7 @@ def main():
 
         task_orders = filter_orders(order_df, task)
         if task_orders.empty:
-            results.append({"task": task, "status": "empty", "message": "没有有效已付款旅客"})
+            results.append({"task": task, "status": "empty", "message": "没有有效已付款/已付尾款旅客"})
             continue
 
         route_info = match_route_info(route_df, task_orders, task)
@@ -76,7 +79,7 @@ def filter_orders(order_df, task):
     start_date = normalize(task["startDate"])
 
     df = order_df.copy()
-    df = df[df["订单状态"].eq("已付款")]
+    df = df[df["订单状态"].astype(str).str.strip().isin(VALID_ORDER_STATUSES)]
     df = df[df["参团状态"].eq("有效")]
     df = df[df["旅客姓名"].str.strip().ne("")]
     df = df[df["旅客证件号码"].str.strip().ne("")]
@@ -112,7 +115,7 @@ def build_insurance_payload(task, route_config, route_info, orders):
     end_date = parse_date(task.get("endDate") or task["startDate"])
     offset_days = int(route_config.get("startOffsetDays") or 0)
     duration_days = int(route_config.get("durationDays") or max((end_date - start_date).days + 1, 1))
-    insurance_start = start_date + timedelta(days=offset_days)
+    insurance_start = start_date - timedelta(days=offset_days)
     insurance_end = insurance_start + timedelta(days=duration_days - 1)
     remark = render_template(route_config.get("remarkTemplate") or "{routeName} {startDate}", task, route_info)
 
@@ -131,6 +134,22 @@ def build_insurance_payload(task, route_config, route_info, orders):
             " ".join(
                 value
                 for value in [traveler["name"], traveler["gender"], traveler["idNumber"], traveler["birthday"]]
+                if value
+            )
+        )
+
+    leader_traveler = parse_leader_traveler(route_info.get("队长安排", ""))
+    if leader_traveler and not any(normalize(item.get("idNumber")) == normalize(leader_traveler["idNumber"]) for item in travelers):
+        travelers.append(leader_traveler)
+        paste_lines.append(
+            " ".join(
+                value
+                for value in [
+                    leader_traveler["name"],
+                    leader_traveler["gender"],
+                    leader_traveler["idNumber"],
+                    leader_traveler["birthday"],
+                ]
                 if value
             )
         )
@@ -181,6 +200,49 @@ def render_template(template, task, route_info):
     for key, value in values.items():
         template = template.replace("{" + key + "}", str(value))
     return template
+
+
+def parse_leader_traveler(text):
+    source = str(text or "").strip()
+    if not source:
+        return None
+
+    id_match = re.search(r"身份证[:：]?\s*([0-9Xx]{15,18})", source)
+    if not id_match:
+        return None
+    id_number = id_match.group(1).upper()
+
+    prefix = re.split(r"身份证[:：]", source)[0]
+    name_match = re.search(r"[:：]\s*([^\s（(]+)", prefix)
+    name = (name_match.group(1).strip() if name_match else "")
+    if not name:
+        return None
+
+    return {
+        "name": name,
+        "gender": derive_gender_from_id(id_number),
+        "idType": "身份证",
+        "idNumber": id_number,
+        "birthday": derive_birthday_from_id(id_number),
+    }
+
+
+def derive_birthday_from_id(id_number):
+    value = str(id_number or "").strip()
+    if re.fullmatch(r"\d{17}[\dX]", value, re.IGNORECASE):
+        return f"{value[6:10]}-{value[10:12]}-{value[12:14]}"
+    if re.fullmatch(r"\d{15}", value):
+        return f"19{value[6:8]}-{value[8:10]}-{value[10:12]}"
+    return ""
+
+
+def derive_gender_from_id(id_number):
+    value = str(id_number or "").strip()
+    if re.fullmatch(r"\d{17}[\dX]", value, re.IGNORECASE):
+        return "女" if int(value[16]) % 2 == 0 else "男"
+    if re.fullmatch(r"\d{15}", value):
+        return "女" if int(value[14]) % 2 == 0 else "男"
+    return ""
 
 
 def parse_date(value):

@@ -11,6 +11,7 @@ if (!args.orders || !args.routes || !args.config) {
 
 const outputDir = path.resolve(args["output-dir"] || "automation/outputs");
 await fs.mkdir(outputDir, { recursive: true });
+const VALID_ORDER_STATUSES = new Set(["已付款", "已付尾款"]);
 
 const config = JSON.parse(await fs.readFile(path.resolve(args.config), "utf8"));
 const orderRows = readSheetRows(args.orders);
@@ -25,7 +26,7 @@ for (const task of config.tasks.filter((item) => item.enabled)) {
 
   const taskOrders = filterOrders(orderRows, task);
   if (taskOrders.length === 0) {
-    results.push({ task, status: "empty", message: "没有有效已付款旅客" });
+    results.push({ task, status: "empty", message: "没有有效已付款/已付尾款旅客" });
     continue;
   }
 
@@ -78,7 +79,7 @@ function filterOrders(rows, task) {
   const seen = new Set();
 
   return rows.filter((row) => {
-    if (row["订单状态"] !== "已付款") return false;
+    if (!VALID_ORDER_STATUSES.has(String(row["订单状态"] || "").trim())) return false;
     if (row["参团状态"] !== "有效") return false;
     if (!String(row["旅客姓名"] || "").trim()) return false;
     if (!String(row["旅客证件号码"] || "").trim()) return false;
@@ -110,7 +111,7 @@ function buildInsurancePayload(task, routeConfig, routeInfo, orders) {
   const startDate = parseDate(task.startDate);
   const endDate = parseDate(task.endDate || task.startDate);
   const durationDays = Number(routeConfig.durationDays || dayDiff(startDate, endDate) + 1 || 1);
-  const insuranceStart = addDays(startDate, Number(routeConfig.startOffsetDays || 0));
+  const insuranceStart = addDays(startDate, -Number(routeConfig.startOffsetDays || 0));
   const insuranceEnd = addDays(insuranceStart, durationDays - 1);
   const remark = renderTemplate(routeConfig.remarkTemplate || "{routeName} {startDate}", task, routeInfo);
 
@@ -121,6 +122,10 @@ function buildInsurancePayload(task, routeConfig, routeInfo, orders) {
     idNumber: String(row["旅客证件号码"] || "").trim(),
     birthday: String(row["旅客出生日期"] || "").trim(),
   }));
+  const leaderTraveler = parseLeaderTraveler(routeInfo["队长安排"] || "");
+  if (leaderTraveler && !travelers.some((item) => normalize(item.idNumber) === normalize(leaderTraveler.idNumber))) {
+    travelers.push(leaderTraveler);
+  }
 
   return {
     task,
@@ -168,6 +173,50 @@ function renderTemplate(template, task, routeInfo) {
     leader: routeInfo["队长安排"] || "",
   };
   return Object.entries(values).reduce((result, [key, value]) => result.replaceAll(`{${key}}`, value), template);
+}
+
+function parseLeaderTraveler(text) {
+  const source = String(text || "").trim();
+  if (!source) return null;
+
+  const idMatch = source.match(/身份证[:：]?\s*([0-9Xx]{15,18})/);
+  if (!idMatch) return null;
+  const idNumber = idMatch[1].toUpperCase();
+
+  const prefix = source.split(/身份证[:：]/)[0] || source;
+  const nameMatch = prefix.match(/[:：]\s*([^\s（(]+)/);
+  const name = String(nameMatch?.[1] || "").trim();
+  if (!name) return null;
+
+  return {
+    name,
+    gender: deriveGenderFromId(idNumber),
+    idType: "身份证",
+    idNumber,
+    birthday: deriveBirthdayFromId(idNumber),
+  };
+}
+
+function deriveBirthdayFromId(idNumber) {
+  const value = String(idNumber || "").trim();
+  if (/^\d{17}[\dX]$/i.test(value)) {
+    return `${value.slice(6, 10)}-${value.slice(10, 12)}-${value.slice(12, 14)}`;
+  }
+  if (/^\d{15}$/.test(value)) {
+    return `19${value.slice(6, 8)}-${value.slice(8, 10)}-${value.slice(10, 12)}`;
+  }
+  return "";
+}
+
+function deriveGenderFromId(idNumber) {
+  const value = String(idNumber || "").trim();
+  if (/^\d{17}[\dX]$/i.test(value)) {
+    return Number(value.charAt(16)) % 2 === 0 ? "女" : "男";
+  }
+  if (/^\d{15}$/.test(value)) {
+    return Number(value.charAt(14)) % 2 === 0 ? "女" : "男";
+  }
+  return "";
 }
 
 function parseArgs(argv) {

@@ -40,6 +40,11 @@
       </div>
     </header>
 
+    <div class="mode-banner" id="modeBanner" hidden>
+      <span class="mode-badge" id="modeBadge">离线配置模式</span>
+      <span id="modeBannerText">当前页面只保存浏览器本地配置；执行自动化前请先启动本地执行器。</span>
+    </div>
+
     <main class="layout">
       <section class="panel">
         <div class="panel-head">
@@ -155,7 +160,8 @@
           </div>
           <div class="credential-note">
             <h3>执行边界</h3>
-            <p>开始执行会先打开后台管理系统。真正的自动导出、清洗、填写保险平台，需要由本地自动化脚本读取这份配置后执行。</p>
+            <p>“保存”只会保存当前浏览器里的配置，不会写入本地执行器。</p>
+            <p>“开始执行”会把配置提交给本地执行器并启动自动化；如果直接双击打开 <code>index.html</code>，当前属于离线配置模式。</p>
             <p>如果开启自动确认投保或自动支付，预检会提示风险；第一版建议保持人工确认和人工支付。</p>
             <div class="run-status" id="runStatus">
               <strong>执行状态</strong>

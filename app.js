@@ -1,7 +1,7 @@
 const STORAGE_KEY = "insuranceAutomationConfig.v1";
 const AUTH_KEY = "insuranceAutomationAuth.v1";
-const PAGE_USERNAME = "xingzou20s";
-const PAGE_PASSWORD = "Xingzou520";
+const PAGE_USERNAME = "";
+const PAGE_PASSWORD = "";
 const DASHBOARD_ORIGIN = "http://localhost:17820";
 
 const defaultConfig = {
@@ -47,9 +47,9 @@ const defaultConfig = {
   ],
   companies: [
     {
-      code: "GZXS20",
-      name: "广州行走贰拾国际旅行社有限公司",
-      taxId: "91440101MA5D5UHG6K",
+      code: "COMPANY001",
+      name: "",
+      taxId: "",
     },
   ],
 };
@@ -66,6 +66,9 @@ const companiesBody = document.querySelector("#companiesTable tbody");
 const checkList = document.querySelector("#checkList");
 const toast = document.querySelector("#toast");
 const runStatusText = document.querySelector("#runStatusText");
+const modeBanner = document.querySelector("#modeBanner");
+const modeBadge = document.querySelector("#modeBadge");
+const modeBannerText = document.querySelector("#modeBannerText");
 const platformInputs = {
   admin: {
     url: document.querySelector("#adminUrlInput"),
@@ -89,11 +92,15 @@ Object.values(platformInputs).forEach((group) => {
 document.querySelector("#saveBtn").addEventListener("click", () => {
   syncPlatformsFromInputs();
   saveState();
-  showToast("配置已保存到本地浏览器。");
+  showToast("已保存到当前浏览器。");
 });
 
 loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (!pageAuthEnabled()) {
+    showApp();
+    return;
+  }
   const username = document.querySelector("#pageUsernameInput").value.trim();
   const password = document.querySelector("#pagePasswordInput").value;
 
@@ -123,26 +130,26 @@ document.querySelector("#startRunBtn").addEventListener("click", async () => {
     return;
   }
 
-  if (canUseDashboardApi()) {
-    try {
-      const response = await fetch(`${dashboardBaseUrl()}/api/start-run`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(state),
-      });
-      const result = await response.json();
-      if (!response.ok || !result.ok) throw new Error(result.message || "启动失败");
-      showToast("配置已保存，本地自动化执行器已启动。");
-      refreshRunStatus();
-      return;
-    } catch (error) {
-      showToast(`启动执行器失败：${error.message}`);
-      return;
-    }
+  if (!(await hasDashboardConnection())) {
+    showToast("未连接本地执行器，请先运行 npm run dashboard。");
+    refreshRunStatus();
+    return;
   }
 
-  window.open(state.platforms.admin.url, "_blank", "noopener");
-  showToast("本地执行器不可用，已仅打开后台。请先运行 npm run dashboard。");
+  try {
+    const response = await fetch(`${dashboardBaseUrl()}/api/start-run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(state),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.message || "启动失败");
+    showToast("配置已提交给本地执行器，自动化已启动。");
+    refreshRunStatus();
+  } catch (error) {
+    showToast(`本地执行器启动失败：${error.message}`);
+    refreshRunStatus();
+  }
 });
 
 document.querySelector("#openAdminBtn").addEventListener("click", () => {
@@ -249,6 +256,10 @@ function showApp() {
   render();
   window.clearInterval(window.__runStatusTimer);
   window.__runStatusTimer = window.setInterval(refreshRunStatus, 2000);
+}
+
+function pageAuthEnabled() {
+  return Boolean(String(PAGE_USERNAME || "").trim() && String(PAGE_PASSWORD || "").trim());
 }
 
 function renderPlatforms() {
@@ -512,8 +523,20 @@ function showToast(message) {
 }
 
 async function refreshRunStatus() {
-  if (!canUseDashboardApi()) {
-    runStatusText.textContent = "未连接本地执行器";
+  const statusState = { mode: "offline", text: "", banner: "" };
+  const fileMode = location.protocol === "file:";
+
+  if (!(await hasDashboardConnection())) {
+    if (fileMode) {
+      statusState.mode = "offline";
+      statusState.text = "当前为本地离线模式，可保存浏览器配置；要执行自动化请先启动 dashboard";
+      statusState.banner = "当前页面只保存浏览器本地配置；如需执行自动化，请先运行 npm run dashboard 并访问 http://localhost:17820";
+    } else {
+      statusState.mode = "error";
+      statusState.text = "执行器连接失败";
+      statusState.banner = "当前页面已通过 localhost 打开，但本地执行器未响应，请检查 npm run dashboard 是否仍在运行";
+    }
+    applyRunStatus(statusState);
     return;
   }
 
@@ -521,7 +544,10 @@ async function refreshRunStatus() {
     const response = await fetch(`${dashboardBaseUrl()}/api/status`);
     const result = await response.json();
     if (!result.status) {
-      runStatusText.textContent = result.running ? "执行器运行中，等待状态回报" : "未启动";
+      statusState.mode = "online";
+      statusState.text = result.running ? "执行器运行中，等待状态回报" : "执行器已连接，未启动任务";
+      statusState.banner = "当前已连接本地执行器，可以直接开始执行自动化";
+      applyRunStatus(statusState);
       return;
     }
 
@@ -530,14 +556,24 @@ async function refreshRunStatus() {
       `时间：${result.status.updatedAt || "-"}`,
       `说明：${result.status.message || "-"}`,
     ];
-    runStatusText.textContent = parts.join("\n");
+    statusState.mode = "online";
+    statusState.text = parts.join("\n");
+    statusState.banner = "当前已连接本地执行器，可以直接开始执行自动化";
+    applyRunStatus(statusState);
   } catch {
-    runStatusText.textContent = "状态读取失败";
+    statusState.mode = fileMode ? "offline" : "error";
+    statusState.text = fileMode
+      ? "当前为本地离线模式，可保存浏览器配置；要执行自动化请先启动 dashboard"
+      : "执行器连接失败";
+    statusState.banner = fileMode
+      ? "当前页面只保存浏览器本地配置；如需执行自动化，请先运行 npm run dashboard 并访问 http://localhost:17820"
+      : "当前页面已通过 localhost 打开，但本地执行器未响应，请检查 npm run dashboard 是否仍在运行";
+    applyRunStatus(statusState);
   }
 }
 
 function canUseDashboardApi() {
-  return true;
+  return Boolean(dashboardBaseUrl());
 }
 
 function dashboardBaseUrl() {
@@ -545,6 +581,26 @@ function dashboardBaseUrl() {
     return location.origin;
   }
   return DASHBOARD_ORIGIN;
+}
+
+async function hasDashboardConnection() {
+  if (!canUseDashboardApi()) return false;
+
+  try {
+    const response = await fetch(`${dashboardBaseUrl()}/api/status`, { method: "GET" });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function applyRunStatus({ mode, text, banner }) {
+  runStatusText.textContent = text;
+  modeBanner.hidden = false;
+  modeBannerText.textContent = banner;
+  modeBadge.className = `mode-badge ${mode}`;
+  modeBadge.textContent =
+    mode === "online" ? "执行器在线" : mode === "error" ? "执行器未连接" : "离线配置模式";
 }
 
 function syncPlatformsFromInputs() {
@@ -612,6 +668,6 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-if (sessionStorage.getItem(AUTH_KEY) === "1") {
+if (!pageAuthEnabled() || sessionStorage.getItem(AUTH_KEY) === "1") {
   showApp();
 }
