@@ -11,6 +11,7 @@ if (!args.orders || !args.routes || !args.config) {
 
 const outputDir = path.resolve(args["output-dir"] || "automation/outputs");
 await fs.mkdir(outputDir, { recursive: true });
+const VALID_ORDER_STATUSES = new Set(["已付款", "已付尾款"]);
 
 const config = JSON.parse(await fs.readFile(path.resolve(args.config), "utf8"));
 const orderRows = readSheetRows(args.orders);
@@ -76,10 +77,9 @@ function filterOrders(rows, task) {
   const packageName = normalize(task.packageName);
   const startDate = normalize(task.startDate);
   const seen = new Set();
-  const allowedStatuses = new Set(["已付款", "已付尾款"].map(normalize));
 
   return rows.filter((row) => {
-    if (!allowedStatuses.has(normalize(row["订单状态"]))) return false;
+    if (!VALID_ORDER_STATUSES.has(String(row["订单状态"] || "").trim())) return false;
     if (row["参团状态"] !== "有效") return false;
     if (!String(row["旅客姓名"] || "").trim()) return false;
     if (!String(row["旅客证件号码"] || "").trim()) return false;
@@ -122,14 +122,9 @@ function buildInsurancePayload(task, routeConfig, routeInfo, orders) {
     idNumber: String(row["旅客证件号码"] || "").trim(),
     birthday: String(row["旅客出生日期"] || "").trim(),
   }));
-  const seenIds = new Set(travelers.map((item) => item.idNumber).filter(Boolean));
-  const leaderRaw = routeInfo["队长安排"] || routeInfo["领队安排"] || "";
-  const leader = parseLeaderTraveler(leaderRaw);
-  if (leaderRaw && !leader) {
-    console.warn(`跳过队长信息：销转表中缺少可用身份证 -> ${leaderRaw}`);
-  }
-  if (leader && !seenIds.has(leader.idNumber)) {
-    travelers.push(leader);
+  const leaderTraveler = parseLeaderTraveler(routeInfo["队长安排"] || "");
+  if (leaderTraveler && !travelers.some((item) => normalize(item.idNumber) === normalize(leaderTraveler.idNumber))) {
+    travelers.push(leaderTraveler);
   }
 
   return {
@@ -155,42 +150,6 @@ function buildInsurancePayload(task, routeConfig, routeInfo, orders) {
   };
 }
 
-function parseLeaderTraveler(value) {
-  const text = String(value || "").trim();
-  if (!text) return null;
-
-  const idMatch = text.match(/\u8eab\u4efd\u8bc1[:\uFF1A]?\s*(\d{17}[\dXx]|\d{15})|(\d{17}[\dXx]|\d{15})/u);
-  if (!idMatch) return null;
-
-  const idNumber = String(idMatch[1] || idMatch[2] || "").toUpperCase();
-  const leaderNameMatch = text.match(/\u4e3b\u961f[:\uFF1A]?\s*([^\n\uFF08(]+)/u);
-  const prefix = leaderNameMatch ? leaderNameMatch[1].trim() : text.slice(0, idMatch.index).trim();
-  const name = prefix
-    .replace(/[\uFF08(].*$/, "")
-    .replace(/\s+/g, "")
-    .trim();
-  if (!name) return null;
-
-  return {
-    name,
-    gender: "",
-    idType: "\u8eab\u4efd\u8bc1",
-    idNumber,
-    birthday: extractBirthdayFromId(idNumber),
-  };
-}
-
-function extractBirthdayFromId(idNumber) {
-  const normalizedId = String(idNumber || "").trim().toUpperCase();
-  if (/^\d{17}[\dX]$/.test(normalizedId)) {
-    return normalizedId.slice(6, 14);
-  }
-  if (/^\d{15}$/.test(normalizedId)) {
-    return `19${normalizedId.slice(6, 12)}`;
-  }
-  return "";
-}
-
 function findRouteConfig(routes, routeName) {
   const target = normalize(routeName);
   return routes.find((route) => {
@@ -214,6 +173,50 @@ function renderTemplate(template, task, routeInfo) {
     leader: routeInfo["队长安排"] || "",
   };
   return Object.entries(values).reduce((result, [key, value]) => result.replaceAll(`{${key}}`, value), template);
+}
+
+function parseLeaderTraveler(text) {
+  const source = String(text || "").trim();
+  if (!source) return null;
+
+  const idMatch = source.match(/身份证[:：]?\s*([0-9Xx]{15,18})/);
+  if (!idMatch) return null;
+  const idNumber = idMatch[1].toUpperCase();
+
+  const prefix = source.split(/身份证[:：]/)[0] || source;
+  const nameMatch = prefix.match(/[:：]\s*([^\s（(]+)/);
+  const name = String(nameMatch?.[1] || "").trim();
+  if (!name) return null;
+
+  return {
+    name,
+    gender: deriveGenderFromId(idNumber),
+    idType: "身份证",
+    idNumber,
+    birthday: deriveBirthdayFromId(idNumber),
+  };
+}
+
+function deriveBirthdayFromId(idNumber) {
+  const value = String(idNumber || "").trim();
+  if (/^\d{17}[\dX]$/i.test(value)) {
+    return `${value.slice(6, 10)}-${value.slice(10, 12)}-${value.slice(12, 14)}`;
+  }
+  if (/^\d{15}$/.test(value)) {
+    return `19${value.slice(6, 8)}-${value.slice(8, 10)}-${value.slice(10, 12)}`;
+  }
+  return "";
+}
+
+function deriveGenderFromId(idNumber) {
+  const value = String(idNumber || "").trim();
+  if (/^\d{17}[\dX]$/i.test(value)) {
+    return Number(value.charAt(16)) % 2 === 0 ? "女" : "男";
+  }
+  if (/^\d{15}$/.test(value)) {
+    return Number(value.charAt(14)) % 2 === 0 ? "女" : "男";
+  }
+  return "";
 }
 
 function parseArgs(argv) {

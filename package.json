@@ -1,15 +1,13 @@
 {
   "name": "insurance-automation",
-  "version": "0.2.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "scripts": {
-    "install-browsers": "node automation/install-browsers.mjs",
+    "install-browsers": "playwright install chromium",
     "dashboard": "node automation/server.mjs",
-    "preflight": "node automation/preflight.mjs --config automation/config.json",
-    "dry-run": "node automation/run.mjs --dry-run true --config automation/config.json",
+    "dry-run": "node automation/run.mjs --dry-run true",
     "run": "node automation/run.mjs",
-    "run:auto-export": "node automation/run.mjs --config automation/config.json --export true",
     "clean": "node automation/clean-data.mjs"
   },
   "dependencies": {
