@@ -1,19 +1,12 @@
 # Insurance Automation
 
-本项目用于本地执行旅游订单导出、销转表导出、数据清洗，以及九时保投保自动化。
+本项目用于在 Windows 本地完成以下流程：
 
-## 目录说明
-
-- `index.html` / `app.js` / `styles.css`
-  - 本地配置页面
-- `automation/run.mjs`
-  - 主执行器
-- `automation/browser-actions.mjs`
-  - 浏览器自动化动作
-- `automation/clean-data.mjs`
-  - 订单列表和销转表清洗脚本
-- `automation/config.sample.json`
-  - 配置模板
+- 直接打开 `file://.../index.html` 配置路线、任务和账号
+- 通过 Playwright 自动登录后台与保险平台
+- 自动导出订单列表、销转表，或直接使用本地 Excel
+- 清洗数据并生成投保 payload
+- 自动填写九时保投保页面，并在自动模式下判断是否出现成功结果特征
 
 ## 运行环境
 
@@ -21,98 +14,94 @@
 - npm
 - Playwright Chromium
 
-## 安装
+## Windows 一键启动
 
-```bash
-npm install
-npm run install-browsers
-```
-
-## 启动配置页面
-
-```bash
-npm run dashboard
-```
-
-然后访问：
-
-```text
-http://localhost:17820
-```
-
-默认公开版不内置页面登录账号密码，启动后会直接进入配置页。
-如果你希望给本地配置页再加一层登录校验，可以在 [app.js](/Users/macm/Documents/保险/app.js) 里设置 `PAGE_USERNAME` 和 `PAGE_PASSWORD`。
-
-## 两种打开方式
-
-### 1. `file:///.../index.html`
-
-- 适合离线维护配置
-- 可以编辑并点击“保存”，数据会写入当前浏览器 `localStorage`
-- 不会写入 `automation/config.json`
-- 不能直接执行自动化；点击“开始执行”前需要先启动本地执行器
-
-### 2. `http://localhost:17820`
-
-- 适合正式执行自动化
-- 仍然可以点击“保存”，但这一步只保存浏览器本地配置
-- 点击“开始执行”时，页面会把当前配置提交给本地执行器，并写入 `automation/config.json`
-- 如果执行器未运行，页面会提示先执行 `npm run dashboard`
-
-## 配置说明
-
-请基于模板创建本地配置：
-
-```bash
-cp automation/config.sample.json automation/config.json
-```
-
-`automation/config.json` 已加入 `.gitignore`，用于保存本机真实账号密码，不会提交到仓库。
-公开仓库里只保留空白示例文件 [automation/config.sample.json](/Users/macm/Documents/保险/automation/config.sample.json)。
-
-如果只是想把页面里的配置长期保存在当前浏览器，用“保存”即可；如果想让本地执行器真正读取并执行，必须通过 `http://localhost:17820` 页面点击“开始执行”，或直接在命令行里指定 `automation/config.json` 运行。
-
-## 直接运行执行器
-
-```bash
-node automation/run.mjs --config automation/config.json
-```
-
-只做配置预检：
-
-```bash
-npm run dry-run -- --config automation/config.json
-```
-
-自动执行后台导出：
-
-```bash
-node automation/run.mjs --config automation/config.json --export true
-```
-
-## 数据清洗
-
-```bash
-node automation/clean-data.mjs \
-  --orders /path/to/订单列表.xlsx \
-  --routes /path/to/销转表.xlsx \
-  --config automation/config.json \
-  --output-dir automation/outputs
-```
-
-## Windows
-
-Windows 可按同样方式安装 Node/npm 和 Playwright 后运行，命令示例：
+如果你是把产品打包给别人用，优先使用：
 
 ```powershell
-npm install
-npm run install-browsers
-npm run dashboard
+.\one-click-start.cmd
 ```
 
-## 注意
+它会自动完成：
 
-- 本仓库不包含真实下载数据、浏览器登录态、运行输出和真实密码配置
-- 本仓库的公开版本为 `v1.0.1`
-- `node_modules` 不入库，依赖通过 `package.json` 和 `package-lock.json` 还原
-- Playwright 浏览器二进制通过 `npm run install-browsers` 安装
+- 首次生成 `automation/config.json`
+- 检查 `node_modules`
+- 检查或安装 Playwright Chromium
+- 启动本地桥接
+- 打开本地配置页
+
+## Windows 快速开始
+
+```powershell
+.\install-deps.cmd
+.\install-browsers.cmd
+.\open-config.cmd
+```
+
+推荐再开一个终端启动本地桥接服务：
+
+```powershell
+.\start-bridge.cmd
+```
+
+桥接启动后，`index.html` 页面里可以直接：
+
+- 保存配置到 `automation/config.json`
+- 执行预检
+- 启动自动化
+- 查看最近一次运行状态
+
+## 不启桥接时的用法
+
+即使不启动 `localhost` 桥接，配置页依然可以：
+
+- 保存到浏览器本地缓存
+- 导出 JSON
+- 生成推荐命令
+
+然后在项目根目录运行：
+
+```powershell
+node automation\preflight.mjs --config automation\config.json --export true
+node automation\run.mjs --config automation\config.json --export true
+```
+
+本地 Excel 模式：
+
+```powershell
+node automation\preflight.mjs --config automation\config.json --orders "D:\orders.xlsx" --routes "D:\routes.xlsx"
+node automation\run.mjs --config automation\config.json --orders "D:\orders.xlsx" --routes "D:\routes.xlsx"
+```
+
+## 常用脚本
+
+- `one-click-start.cmd`：一键检查依赖、安装浏览器、启动桥接并打开配置页
+- `open-config.cmd`：打开本地配置页
+- `start-bridge.cmd`：启动本地桥接服务
+- `dry-run.cmd`：执行预检并做 dry-run
+- `run-auto-export.cmd`：自动导出全链路运行
+- `run-local-excel.cmd "订单列表.xlsx" "销转表.xlsx"`：使用本地 Excel 直投
+
+## 打包发布
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build-windows-package.ps1
+```
+
+打包结果：
+
+- `dist/insurance-automation-windows/`
+- `dist/insurance-automation-windows.zip`
+
+打包脚本会尽量把 `node_modules` 和已下载的 `ms-playwright` 浏览器一起带上，让下载包更接近“解压即用”。
+
+## 说明
+
+- `automation/config.json`、`automation/status.json`、`automation/logs/` 都不会入库
+- 首次运行若目标站点出现验证码、短信校验或二次密码弹窗，仍可能需要人工接管
+- 自动模式下，成功判定以页面出现“投保成功”“查看订单”“下载电子保单”“下载保险条款”等结果特征之一为准
+## Public release
+
+- This repo is for public Windows automation use.
+- `automation/config.sample.json` is the tracked template. Copy it to `automation/config.json` locally and fill in your own values.
+- Do not commit real account names or passwords to GitHub.
