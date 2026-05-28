@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>投保自动化配置</title>
+    <title>保险自动化配置台</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
       <form class="login-card" id="loginForm">
-        <h1>投保自动化配置</h1>
-        <p>请输入访问账号后继续。</p>
+        <h1>保险自动化配置台</h1>
+        <p>输入页面账号后继续。该账号只用于打开本地配置页。</p>
         <label>
           <span>账号</span>
           <input id="pageUsernameInput" autocomplete="username" autofocus />
@@ -25,177 +25,225 @@
     </section>
 
     <div id="appShell" hidden>
-    <header class="topbar">
-      <div>
-        <h1>投保自动化配置</h1>
-        <p>维护本次执行表和总路线配置库，供后续自动导出、清洗、投保流程读取。</p>
-      </div>
-      <div class="topbar-actions">
-        <button class="run" id="startRunBtn" type="button">开始执行</button>
-        <button class="secondary" id="logoutBtn" type="button">退出</button>
-        <button class="secondary" id="exportJsonBtn" type="button">导出配置</button>
-        <label class="secondary file-button" for="importJsonInput">导入配置</label>
-        <input id="importJsonInput" type="file" accept="application/json" />
-        <button class="primary" id="saveBtn" type="button">保存</button>
-      </div>
-    </header>
+      <header class="topbar">
+        <div>
+          <h1>保险自动化配置台</h1>
+          <p>优先支持直接打开本地 `file://` 页面配置，再通过 Playwright 执行。</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="run" id="startRunBtn" type="button">开始执行</button>
+          <button class="secondary" id="runPreflightBtn" type="button">执行预检</button>
+          <button class="secondary" id="copyCommandBtn" type="button">复制命令</button>
+          <button class="secondary" id="exportJsonBtn" type="button">导出配置</button>
+          <label class="secondary file-button" for="importJsonInput">导入配置</label>
+          <input id="importJsonInput" type="file" accept="application/json" />
+          <button class="primary" id="saveBtn" type="button">保存配置</button>
+          <button class="ghost" id="logoutBtn" type="button">退出</button>
+        </div>
+      </header>
 
-    <div class="mode-banner" id="modeBanner" hidden>
-      <span class="mode-badge" id="modeBadge">离线配置模式</span>
-      <span id="modeBannerText">当前页面只保存浏览器本地配置；执行自动化前请先启动本地执行器。</span>
-    </div>
-
-    <main class="layout">
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>本次执行表</h2>
-            <p>每次运行前，只勾选需要投保的路线和排期。</p>
-          </div>
-          <div class="panel-actions">
-            <button class="secondary" id="addTaskBtn" type="button">新增执行路线</button>
-            <button class="ghost" id="exportTasksCsvBtn" type="button">导出 CSV</button>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table id="tasksTable">
-            <thead>
-              <tr>
-                <th>执行</th>
-                <th>路线名称</th>
-                <th>规格/套餐</th>
-                <th>出发日期</th>
-                <th>结束日期</th>
-                <th>配置匹配</th>
-                <th>确认投保</th>
-                <th>支付</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>总路线配置库</h2>
-            <p>定义每条路线默认使用的公司主体、分类、保司、产品和起保规则。</p>
-          </div>
-          <div class="panel-actions">
-            <button class="secondary" id="addRouteBtn" type="button">新增路线配置</button>
-            <button class="ghost" id="exportRoutesCsvBtn" type="button">导出 CSV</button>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table id="routesTable">
-            <thead>
-              <tr>
-                <th>启用</th>
-                <th>路线名称</th>
-                <th>路线类型</th>
-                <th>关键词</th>
-                <th>公司主体</th>
-                <th>分类</th>
-                <th>保司</th>
-                <th>产品</th>
-                <th>计划</th>
-                <th>提前天数</th>
-                <th>保险天数</th>
-                <th>备注格式</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>平台账号</h2>
-            <p>用于后续自动登录后台管理系统和保险平台；当前保存于本机浏览器本地存储。</p>
-          </div>
-          <div class="panel-actions">
-            <button class="ghost" id="openAdminBtn" type="button">打开后台</button>
-            <button class="ghost" id="openInsuranceBtn" type="button">打开保险平台</button>
-          </div>
-        </div>
-        <div class="credentials-grid">
-          <div class="credential-box">
-            <h3>后台管理系统</h3>
-            <label>
-              <span>登录地址</span>
-              <input id="adminUrlInput" type="url" />
-            </label>
-            <label>
-              <span>账号</span>
-              <input id="adminUsernameInput" autocomplete="username" />
-            </label>
-            <label>
-              <span>密码</span>
-              <input id="adminPasswordInput" type="password" autocomplete="current-password" />
-            </label>
-            <label>
-              <span>二次密码/安全密码</span>
-              <input id="adminSecurityPasswordInput" type="password" autocomplete="off" />
-            </label>
-          </div>
-          <div class="credential-box">
-            <h3>保险平台</h3>
-            <label>
-              <span>登录地址</span>
-              <input id="insuranceUrlInput" type="url" />
-            </label>
-            <label>
-              <span>账号</span>
-              <input id="insuranceUsernameInput" autocomplete="username" />
-            </label>
-            <label>
-              <span>密码</span>
-              <input id="insurancePasswordInput" type="password" autocomplete="current-password" />
-            </label>
-          </div>
-          <div class="credential-note">
-            <h3>执行边界</h3>
-            <p>“保存”只会保存当前浏览器里的配置，不会写入本地执行器。</p>
-            <p>“开始执行”会把配置提交给本地执行器并启动自动化；如果直接双击打开 <code>index.html</code>，当前属于离线配置模式。</p>
-            <p>如果开启自动确认投保或自动支付，预检会提示风险；第一版建议保持人工确认和人工支付。</p>
-            <div class="run-status" id="runStatus">
-              <strong>执行状态</strong>
-              <div id="runStatusText">未启动</div>
+      <main class="layout">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>运行模式</h2>
+              <p>支持自动导出全链路，或直接使用本地 Excel 跳过后台导出。</p>
             </div>
           </div>
-        </div>
-      </section>
+          <div class="execution-grid">
+            <label class="field">
+              <span>执行模式</span>
+              <select id="executionModeInput">
+                <option value="auto-export">自动导出并投保</option>
+                <option value="local-excel">使用本地 Excel 直投</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>订单列表路径</span>
+              <input id="ordersPathInput" placeholder="D:\数据\订单列表.xlsx" />
+            </label>
+            <label class="field">
+              <span>销转表路径</span>
+              <input id="routesPathInput" placeholder="D:\数据\销转表.xlsx" />
+            </label>
+            <label class="field checkbox-field">
+              <input id="headlessInput" type="checkbox" />
+              <span>无头运行</span>
+            </label>
+            <label class="field checkbox-field">
+              <input id="closeOnSuccessInput" type="checkbox" />
+              <span>成功后自动关闭浏览器</span>
+            </label>
+          </div>
+          <div class="execution-note">
+            <div>
+              <strong>本地桥接状态</strong>
+              <div id="bridgeStatusText">正在检查 localhost 桥接服务...</div>
+            </div>
+            <div>
+              <strong>推荐命令</strong>
+              <pre id="commandPreview"></pre>
+            </div>
+          </div>
+        </section>
 
-      <section class="panel split">
-        <div>
-          <h2>公司主体</h2>
-          <p>投保前会校验保险平台上的投保人是否与配置一致。</p>
-          <div class="table-wrap compact">
-            <table id="companiesTable">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>本次执行表</h2>
+              <p>每次运行前，只勾选需要投保的路线和排期。</p>
+            </div>
+            <div class="panel-actions">
+              <button class="secondary" id="addTaskBtn" type="button">新增执行路线</button>
+              <label class="ghost file-button" for="importTasksInput">导入</label>
+              <input id="importTasksInput" type="file" accept=".json,.csv,application/json,text/csv" />
+              <button class="ghost" id="exportTasksCsvBtn" type="button">导出 CSV</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="tasksTable">
               <thead>
                 <tr>
-                  <th>主体编码</th>
-                  <th>公司名称</th>
-                  <th>纳税人识别号</th>
+                  <th>执行</th>
+                  <th>路线名称</th>
+                  <th>规格/套餐</th>
+                  <th>出发日期</th>
+                  <th>结束日期</th>
+                  <th>配置匹配</th>
+                  <th>确认投保</th>
+                  <th>支付</th>
                   <th>操作</th>
                 </tr>
               </thead>
               <tbody></tbody>
             </table>
           </div>
-          <button class="secondary inline-action" id="addCompanyBtn" type="button">新增公司主体</button>
-        </div>
-        <aside class="summary">
-          <h2>运行预检</h2>
-          <div id="checkList"></div>
-        </aside>
-      </section>
-    </main>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>总路线配置库</h2>
+              <p>这里就是工具内部的路线规则库，用来定义每条路线默认使用的公司主体、分类、保险公司、产品、保险时长与备注模板。</p>
+            </div>
+            <div class="panel-actions">
+              <button class="secondary" id="addRouteBtn" type="button">新增路线配置</button>
+              <label class="ghost file-button" for="importRoutesInput">导入</label>
+              <input id="importRoutesInput" type="file" accept=".json,.csv,application/json,text/csv" />
+              <button class="ghost" id="exportRoutesCsvBtn" type="button">导出 CSV</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="routesTable">
+              <thead>
+                <tr>
+                  <th>启用</th>
+                  <th>路线名称</th>
+                  <th>路线类型</th>
+                  <th>关键词</th>
+                  <th>公司主体</th>
+                  <th>分类</th>
+                  <th>保险公司</th>
+                  <th>产品</th>
+                  <th>计划</th>
+                  <th>提前天数</th>
+                  <th>保险天数</th>
+                  <th>备注模板</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>平台账号</h2>
+              <p>用于自动登录后台管理系统与九时保平台。</p>
+            </div>
+            <div class="panel-actions">
+              <button class="ghost" id="openAdminBtn" type="button">打开后台</button>
+              <button class="ghost" id="openInsuranceBtn" type="button">打开保险平台</button>
+            </div>
+          </div>
+          <div class="credentials-grid">
+            <div class="credential-box">
+              <h3>后台管理系统</h3>
+              <label>
+                <span>登录地址</span>
+                <input id="adminUrlInput" type="url" />
+              </label>
+              <label>
+                <span>账号</span>
+                <input id="adminUsernameInput" autocomplete="username" />
+              </label>
+              <label>
+                <span>密码</span>
+                <input id="adminPasswordInput" type="password" autocomplete="current-password" />
+              </label>
+              <label>
+                <span>二次密码/安全密码</span>
+                <input id="adminSecurityPasswordInput" type="password" autocomplete="off" />
+              </label>
+            </div>
+            <div class="credential-box">
+              <h3>保险平台</h3>
+              <label>
+                <span>登录地址</span>
+                <input id="insuranceUrlInput" type="url" />
+              </label>
+              <label>
+                <span>账号</span>
+                <input id="insuranceUsernameInput" autocomplete="username" />
+              </label>
+              <label>
+                <span>密码</span>
+                <input id="insurancePasswordInput" type="password" autocomplete="current-password" />
+              </label>
+            </div>
+            <div class="credential-note">
+              <h3>执行状态</h3>
+              <p>开启本地桥接服务后，可以直接从本页面落盘配置、执行预检，并启动 Playwright。</p>
+              <p>未开启桥接时，本页面仍可导出 JSON、复制推荐命令，交给 Windows 脚本执行。</p>
+              <div class="run-status" id="runStatus">
+                <strong>最近状态</strong>
+                <div id="runStatusText">尚未执行</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel split">
+          <div>
+            <h2>公司主体</h2>
+            <p>投保前会校验九时保页面上的投保人是否与配置一致。</p>
+            <div class="table-wrap compact">
+              <table id="companiesTable">
+                <thead>
+                  <tr>
+                    <th>主体编码</th>
+                    <th>公司名称</th>
+                    <th>纳税人识别号</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <button class="secondary inline-action" id="addCompanyBtn" type="button">新增公司主体</button>
+          </div>
+          <aside class="summary">
+            <h2>运行预检</h2>
+            <div id="checkList"></div>
+            <div class="preflight-box">
+              <strong>桥接预检结果</strong>
+              <pre id="preflightOutput">尚未执行预检</pre>
+            </div>
+          </aside>
+        </section>
+      </main>
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>

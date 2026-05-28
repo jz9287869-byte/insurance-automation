@@ -4,7 +4,10 @@ automation/.browser-profile-diagnose/
 automation/downloads/
 automation/outputs/
 automation/outputs-*/
+automation/logs/
 automation/config.json
 automation/status.json
+tmp-business-rule-test/
+dist/
 .DS_Store
 *.log
